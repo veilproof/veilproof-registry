@@ -23,7 +23,7 @@ mod test_vector;
 
 use soroban_sdk::crypto::bn254::{Bn254G1Affine, Bn254G2Affine, Fr};
 use soroban_sdk::{
-    contract, contractimpl, panic_with_error, vec, Address, Bytes, BytesN, Env, Symbol, U256,
+    contract, contractimpl, panic_with_error, vec, Address, Bytes, BytesN, Env, Symbol, Vec, U256,
 };
 
 use types::{
@@ -34,6 +34,9 @@ use types::{
 /// Public inputs for the fixed circuit are (root, nullifier), so the IC
 /// vector has one constant term plus two, i.e. length 3.
 const EXPECTED_IC_LEN: u32 = 3;
+
+/// Upper bound on a batch verification query, to keep the read budget bounded.
+pub const MAX_BATCH: u32 = 100;
 
 // Persistent-storage TTL management. A used-nullifier entry that silently
 // expired and was pruned would reopen the replay hole, so persistent entries
@@ -234,6 +237,31 @@ impl VeilproofRegistry {
         env.storage()
             .persistent()
             .has(&DataKey::Verified(VerifiedKey { holder, credential }))
+    }
+
+    /// Batch form of [`Self::is_verified`]: one bool per holder, in the same
+    /// order. Bounded by [`MAX_BATCH`] so a single call cannot exhaust the
+    /// read budget; a larger query is rejected rather than truncated.
+    pub fn are_verified(
+        env: Env,
+        holders: Vec<Address>,
+        credential: Symbol,
+    ) -> Result<Vec<bool>, Error> {
+        if holders.len() > MAX_BATCH {
+            return Err(Error::BatchTooLarge);
+        }
+        let mut out = Vec::new(&env);
+        for holder in holders.iter() {
+            out.push_back(
+                env.storage()
+                    .persistent()
+                    .has(&DataKey::Verified(VerifiedKey {
+                        holder,
+                        credential: credential.clone(),
+                    })),
+            );
+        }
+        Ok(out)
     }
 
     pub fn verified_at(env: Env, holder: Address, credential: Symbol) -> Option<u64> {

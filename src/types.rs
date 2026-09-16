@@ -116,6 +116,8 @@ pub enum Error {
     NullifierUsed = 8,
     /// The verifying key's IC length does not match the expected public-input count.
     MalformedVk = 9,
+    /// A batch query exceeded the maximum allowed size.
+    BatchTooLarge = 10,
 }
 
 // --- events ---------------------------------------------------------------
