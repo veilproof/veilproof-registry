@@ -113,13 +113,20 @@ to `bn254.pairing_check(vp1, vp2)` as the two vectors
 
 | Function                                                       | Auth   | Purpose                                              |
 | -------------------------------------------------------------- | ------ | ---------------------------------------------------- |
-| `__constructor(admin, vk, grace_seconds)`                      | —      | Set admin, fix the verifying key, set the grace window |
-| `register_issuer(admin, issuer, credential)`                   | admin  | Authorize an issuer for a named credential           |
+| `__constructor(admin, grace_seconds)`                          | —      | Set admin and the grace window                       |
+| `register_circuit(admin, circuit, vk)`                         | admin  | Register a verifying key under a circuit name (register-once) |
+| `register_issuer(admin, issuer, credential, circuit)`          | admin  | Authorize an issuer for a credential, bound to a circuit |
 | `revoke_issuer(admin, credential)`                             | admin  | Deactivate that issuer                               |
 | `publish_root(issuer, credential, merkle_root)`                | issuer | Publish/update the Merkle root (prior root kept)     |
 | `verify_credential(holder, credential, proof, nullifier)`      | holder | Verify a proof, burn the nullifier, record the holder |
 | `is_verified(holder, credential) -> bool`                      | view   | The on-chain compliance boolean                      |
-| `verified_at`, `is_nullifier_used`, `current_root`, `issuer_of`, `admin` | view | Registry reads                             |
+| `verified_at`, `is_nullifier_used`, `current_root`, `issuer_of`, `circuit_of`, `has_circuit`, `admin` | view | Registry reads |
+
+Every registered circuit shares the same **public-input schema**
+(root, nullifier, addr), so different circuits (e.g. a deeper tree or a
+different hash) can coexist while the contract's verification logic stays
+identical. Arbitrary user-supplied circuits are out of scope: keys are
+admin-curated.
 
 ## Trust model
 
@@ -130,11 +137,12 @@ to `bn254.pairing_check(vp1, vp2)` as the two vectors
   produces proofs this contract will happily accept. The circuit lives in the
   sibling `veilproof-server`; the minimal MiMC circuit in `tools/testvector`
   exists only to generate a real test vector.
-- **The verifying key is fixed at construction and never updatable.** A
-  different circuit is a different key and a *new deployment*. This is the
-  simplest, safest MVP choice — there is no admin function to swap the circuit
-  in place, so no one can silently repoint verification at a different
-  statement.
+- **Verifying keys are admin-curated and register-once.** The admin registers
+  a verifying key under a circuit name; a name cannot be silently repointed at a
+  different key (which would change what proofs verify). Upgrading a circuit
+  means registering a new name and pointing issuers at it — so verification can
+  never be quietly redirected. All circuits share one public-input schema, so
+  the verification code is identical across them.
 - **The issuer is trusted for set membership.** Whoever the admin authorizes as
   issuer defines "who is in the set" by publishing roots. The ZK property is
   that holders prove membership *without revealing which member*; it is not a
@@ -191,27 +199,30 @@ cargo test
 cargo run --manifest-path tools/testvector/Cargo.toml --release
 ```
 
-Deploying to testnet (the verifying key and grace window are constructor
-arguments — see `src/test.rs` for how the key bytes are assembled from the
-generated vector):
+Deploy, then register a circuit and an issuer (the verifying key comes from
+`veilproof-server`'s `veilproof-keygen`; see `src/test.rs` for how the key bytes
+are assembled):
 
 ```sh
 stellar contract deploy \
   --wasm target/wasm32v1-none/release/veilproof_registry.wasm \
   --source <your-key> --network testnet \
-  -- --admin <admin-address> --vk <vk> --grace_seconds 3600
+  -- --admin <admin-address> --grace_seconds 3600
+# then, as admin:
+#   register_circuit(admin, "membership", <vk>)
+#   register_issuer(admin, <issuer>, "kyc", "membership")
 ```
 
 ## Scope and future work
 
-The MVP supports **one fixed circuit** — Merkle-membership + nullifier. This is
-intentional. Deliberately out of scope, each a flagged contributor issue:
+Multiple circuits are supported through an admin-curated registry of verifying
+keys (`register_circuit`), all sharing one public-input schema
+(root, nullifier, addr). The membership + nullifier circuit is the one shipped;
+others (different tree depths, a different hash) can be registered alongside it.
 
-- **Multiple circuit types / arbitrary schemas.** The verifying key is fixed at
-  construction; supporting several circuits means a registry of keys and a
-  circuit selector.
-- **A paged view** over large result sets (the batch `are_verified` view exists;
-  cursor-based paging would extend it).
+Out of scope: arbitrary user-supplied circuits at runtime (keys must be
+admin-curated) and per-circuit public-input schemas. A cursor-paged view over
+large result sets would extend the batch `are_verified` view.
 
 ## Repository layout
 

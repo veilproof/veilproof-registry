@@ -23,13 +23,12 @@ mod test_vector;
 
 use soroban_sdk::crypto::bn254::{Bn254G1Affine, Bn254G2Affine, Fr};
 use soroban_sdk::{
-    contract, contractimpl, panic_with_error, vec, Address, Bytes, BytesN, Env, String, Symbol,
-    Vec, U256,
+    contract, contractimpl, vec, Address, Bytes, BytesN, Env, String, Symbol, Vec, U256,
 };
 
 use types::{
-    CredentialVerified, DataKey, Error, IssuerConfig, IssuerRegistered, IssuerRevoked,
-    NullifierKey, Proof, RootHistory, RootPublished, VerifiedKey, VerifyingKey,
+    CircuitRegistered, CredentialVerified, DataKey, Error, IssuerConfig, IssuerRegistered,
+    IssuerRevoked, NullifierKey, Proof, RootHistory, RootPublished, VerifiedKey, VerifyingKey,
 };
 
 /// Public inputs for the fixed circuit are (root, nullifier, addr), so the IC
@@ -52,32 +51,61 @@ pub struct VeilproofRegistry;
 
 #[contractimpl]
 impl VeilproofRegistry {
-    /// Constructs the registry with its admin, its fixed verifying key, and
-    /// the grace window (seconds) during which a superseded root stays valid.
-    ///
-    /// The verifying key is fixed here and never updatable: a different
-    /// circuit needs a different key and is a new deployment. This is the
-    /// simplest, safest MVP choice — stated plainly so no one expects to
-    /// rotate the circuit in place.
-    pub fn __constructor(env: Env, admin: Address, vk: VerifyingKey, grace_seconds: u64) {
-        if vk.ic.len() != EXPECTED_IC_LEN {
-            panic_with_error!(&env, Error::MalformedVk);
-        }
+    /// Constructs the registry with its admin and the grace window (seconds)
+    /// during which a superseded root stays valid. Verifying keys are added
+    /// afterwards with [`Self::register_circuit`].
+    pub fn __constructor(env: Env, admin: Address, grace_seconds: u64) {
         env.storage().instance().set(&DataKey::Admin, &admin);
-        env.storage().instance().set(&DataKey::Vk, &vk);
         env.storage()
             .instance()
             .set(&DataKey::Grace, &grace_seconds);
     }
 
-    /// Admin authorizes `issuer` to publish roots under `credential`.
+    /// Admin registers a verifying key under a circuit name. Circuits are
+    /// register-once: a name cannot be silently repointed at a different key
+    /// (which would change what proofs verify). To upgrade a circuit, register
+    /// it under a new name and point issuers at it.
+    ///
+    /// Every circuit shares the same public-input schema (root, nullifier,
+    /// addr), so a new circuit can differ in tree depth, hash, or setup while
+    /// the contract's verification logic stays identical.
+    pub fn register_circuit(
+        env: Env,
+        admin: Address,
+        circuit: Symbol,
+        vk: VerifyingKey,
+    ) -> Result<(), Error> {
+        Self::require_admin(&env, &admin)?;
+        if vk.ic.len() != EXPECTED_IC_LEN {
+            return Err(Error::MalformedVk);
+        }
+        let key = DataKey::Circuit(circuit.clone());
+        if env.storage().persistent().has(&key) {
+            return Err(Error::CircuitExists);
+        }
+        env.storage().persistent().set(&key, &vk);
+        bump(&env, &key);
+        CircuitRegistered { circuit }.publish(&env);
+        Ok(())
+    }
+
+    /// Admin authorizes `issuer` to publish roots under `credential`, whose
+    /// proofs are checked against `circuit`'s verifying key.
     pub fn register_issuer(
         env: Env,
         admin: Address,
         issuer: Address,
         credential: Symbol,
+        circuit: Symbol,
     ) -> Result<(), Error> {
         Self::require_admin(&env, &admin)?;
+        if !env
+            .storage()
+            .persistent()
+            .has(&DataKey::Circuit(circuit.clone()))
+        {
+            return Err(Error::CircuitNotFound);
+        }
         let key = DataKey::Issuer(credential.clone());
         if env.storage().persistent().has(&key) {
             return Err(Error::IssuerExists);
@@ -87,6 +115,7 @@ impl VeilproofRegistry {
             &IssuerConfig {
                 issuer: issuer.clone(),
                 active: true,
+                circuit,
             },
         );
         bump(&env, &key);
@@ -173,11 +202,18 @@ impl VeilproofRegistry {
     ) -> Result<(), Error> {
         holder.require_auth();
 
+        // Resolve the credential's issuer config, then the verifying key for
+        // its circuit. A credential with no issuer has no circuit either.
+        let cfg: IssuerConfig = env
+            .storage()
+            .persistent()
+            .get(&DataKey::Issuer(credential.clone()))
+            .ok_or(Error::IssuerNotFound)?;
         let vk: VerifyingKey = env
             .storage()
-            .instance()
-            .get(&DataKey::Vk)
-            .ok_or(Error::NotInitialized)?;
+            .persistent()
+            .get(&DataKey::Circuit(cfg.circuit))
+            .ok_or(Error::CircuitNotFound)?;
         let history: RootHistory = env
             .storage()
             .persistent()
@@ -298,6 +334,19 @@ impl VeilproofRegistry {
             .persistent()
             .get::<_, IssuerConfig>(&DataKey::Issuer(credential))
             .map(|c| c.issuer)
+    }
+
+    /// The circuit a credential's proofs are verified against, if registered.
+    pub fn circuit_of(env: Env, credential: Symbol) -> Option<Symbol> {
+        env.storage()
+            .persistent()
+            .get::<_, IssuerConfig>(&DataKey::Issuer(credential))
+            .map(|c| c.circuit)
+    }
+
+    /// Whether a circuit name has a registered verifying key.
+    pub fn has_circuit(env: Env, circuit: Symbol) -> bool {
+        env.storage().persistent().has(&DataKey::Circuit(circuit))
     }
 
     pub fn admin(env: Env) -> Option<Address> {
