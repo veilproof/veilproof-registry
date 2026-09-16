@@ -4,9 +4,13 @@ use crate::test_vector as tv;
 use crate::types::{Error, Proof, VerifyingKey};
 use crate::{VeilproofRegistry, VeilproofRegistryClient};
 use soroban_sdk::testutils::{Address as _, Ledger as _};
-use soroban_sdk::{vec, Address, BytesN, Env, Symbol};
+use soroban_sdk::{vec, Address, BytesN, Env, String, Symbol};
 
 const GRACE_SECONDS: u64 = 3600;
+
+/// The holder address the committed test vector binds its proof to. Proofs are
+/// address-bound, so the verifying holder must be this exact address.
+const FIXED_HOLDER: &str = "GBYNOOC3UUF2QBCNIRUEHK2J3JOCDSV2QTLG445GW5ZEENPYDSU33OFQ";
 
 fn verifying_key(env: &Env) -> VerifyingKey {
     VerifyingKey {
@@ -19,6 +23,7 @@ fn verifying_key(env: &Env) -> VerifyingKey {
             BytesN::from_array(env, &tv::IC[0]),
             BytesN::from_array(env, &tv::IC[1]),
             BytesN::from_array(env, &tv::IC[2]),
+            BytesN::from_array(env, &tv::IC[3]),
         ],
     }
 }
@@ -53,7 +58,7 @@ fn setup() -> Setup {
     env.mock_all_auths();
     let admin = Address::generate(&env);
     let issuer = Address::generate(&env);
-    let holder = Address::generate(&env);
+    let holder = Address::from_string(&String::from_str(&env, FIXED_HOLDER));
     let credential = Symbol::new(&env, "kyc");
 
     let vk = verifying_key(&env);
@@ -312,4 +317,39 @@ fn are_verified_batch() {
     }
     let res = s.client.try_are_verified(&big, &s.credential);
     assert_eq!(res, Err(Ok(Error::BatchTooLarge)));
+}
+
+/// The address-binding guarantee: a proof made for one holder cannot be
+/// submitted by another, even before the nullifier is spent. This is the
+/// front-running fix — the stolen proof carries the original holder's addr as a
+/// public input, so a different caller fails the pairing check.
+#[test]
+fn stolen_proof_under_other_address_rejected() {
+    let s = setup();
+    s.client.register_issuer(&s.admin, &s.issuer, &s.credential);
+    s.client
+        .publish_root(&s.issuer, &s.credential, &root(&s.env));
+
+    // A different holder submits the (valid, unused) proof first.
+    let attacker = Address::generate(&s.env);
+    let res = s.client.try_verify_credential(
+        &attacker,
+        &s.credential,
+        &real_proof(&s.env),
+        &nullifier(&s.env),
+    );
+    assert_eq!(res, Err(Ok(Error::ProofInvalid)));
+    // The attacker is not verified, and the nullifier is not consumed, so the
+    // real holder can still use it.
+    assert!(!s.client.is_verified(&attacker, &s.credential));
+    assert!(!s
+        .client
+        .is_nullifier_used(&s.credential, &nullifier(&s.env)));
+    s.client.verify_credential(
+        &s.holder,
+        &s.credential,
+        &real_proof(&s.env),
+        &nullifier(&s.env),
+    );
+    assert!(s.client.is_verified(&s.holder, &s.credential));
 }

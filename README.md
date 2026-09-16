@@ -98,7 +98,7 @@ Groth16 proof, serialized this way, verifies through the real native
 
 ### Groth16 verification equation
 
-With `vk_x = IC[0] + root·IC[1] + nullifier·IC[2]`, the contract checks
+With `vk_x = IC[0] + root·IC[1] + nullifier·IC[2] + addr·IC[3]`, the contract checks
 
 ```
 e(-A, B) · e(alpha, beta) · e(vk_x, gamma) · e(C, delta) == 1
@@ -139,14 +139,12 @@ to `bn254.pairing_check(vp1, vp2)` as the two vectors
   issuer defines "who is in the set" by publishing roots. The ZK property is
   that holders prove membership *without revealing which member*; it is not a
   claim that the issuer's set is itself correct.
-- **Known limitation — the MVP proof does not bind the holder address.** The
-  public inputs are `(root, nullifier)` only. A proof observed in the mempool
-  could be submitted by another party under *their* address, consuming the
-  nullifier and recording themselves (not the original holder) as verified.
-  The nullifier still guarantees the credential can be spent only *once* — this
-  only changes *who* gets that one verification. Binding an address-derived
-  public input into the circuit is the fix, tracked as a
-  [future issue](#scope-and-future-work).
+- **The proof is bound to the holder address.** The public inputs are
+  `(root, nullifier, addr)`, where `addr = Fr(sha256(strkey) mod r)` is derived
+  by the contract from the caller. A proof made for one holder therefore cannot
+  be replayed by another — a different caller yields a different `addr` and the
+  pairing check fails. veilproof-server derives the identical `addr` off-chain
+  when generating the proof.
 
 ## Storage & TTL
 
@@ -212,9 +210,8 @@ intentional. Deliberately out of scope, each a flagged contributor issue:
 - **Multiple circuit types / arbitrary schemas.** The verifying key is fixed at
   construction; supporting several circuits means a registry of keys and a
   circuit selector.
-- **Binding the holder address into the proof**, closing the front-running gap
-  described in the trust model.
-- **A batch or paged view** for reading many verification statuses at once.
+- **A paged view** over large result sets (the batch `are_verified` view exists;
+  cursor-based paging would extend it).
 
 ## Repository layout
 

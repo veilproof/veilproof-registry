@@ -633,6 +633,7 @@ dependencies = [
  "ark-std",
  "rand",
  "rand_chacha",
+ "sha2",
 ]
 
 [[package]]
