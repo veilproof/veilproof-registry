@@ -26,5 +26,6 @@ ark-serialize = "0.5"
 ark-std = "0.5"
 rand = "0.8"
 rand_chacha = "0.3"
+sha2 = "0.10"
 
 [workspace]

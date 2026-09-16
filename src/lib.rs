@@ -23,7 +23,8 @@ mod test_vector;
 
 use soroban_sdk::crypto::bn254::{Bn254G1Affine, Bn254G2Affine, Fr};
 use soroban_sdk::{
-    contract, contractimpl, panic_with_error, vec, Address, Bytes, BytesN, Env, Symbol, Vec, U256,
+    contract, contractimpl, panic_with_error, vec, Address, Bytes, BytesN, Env, String, Symbol,
+    Vec, U256,
 };
 
 use types::{
@@ -31,9 +32,9 @@ use types::{
     NullifierKey, Proof, RootHistory, RootPublished, VerifiedKey, VerifyingKey,
 };
 
-/// Public inputs for the fixed circuit are (root, nullifier), so the IC
-/// vector has one constant term plus two, i.e. length 3.
-const EXPECTED_IC_LEN: u32 = 3;
+/// Public inputs for the fixed circuit are (root, nullifier, addr), so the IC
+/// vector has one constant term plus three, i.e. length 4.
+const EXPECTED_IC_LEN: u32 = 4;
 
 /// Upper bound on a batch verification query, to keep the read budget bounded.
 pub const MAX_BATCH: u32 = 100;
@@ -192,15 +193,21 @@ impl VeilproofRegistry {
             return Err(Error::NullifierUsed);
         }
 
+        // The proof is bound to the holder's address: it carries `addr` as a
+        // public input, derived here from the caller. A proof made for one
+        // holder therefore cannot be replayed by another — a different caller
+        // yields a different `addr` and the pairing check fails.
+        let addr = address_field(&env, &holder);
+
         // Try the current root; if that isn't the root the holder proved
         // against, try the previous one while it is still within grace.
-        let mut ok = groth16_verify(&env, &vk, &proof, &history.current, &nullifier)?;
+        let mut ok = groth16_verify(&env, &vk, &proof, &history.current, &nullifier, &addr)?;
         if !ok {
             if let Some(previous) = history.previous {
                 let grace: u64 = env.storage().instance().get(&DataKey::Grace).unwrap_or(0);
                 let now = env.ledger().timestamp();
                 if now <= history.previous_ts.saturating_add(grace) {
-                    ok = groth16_verify(&env, &vk, &proof, &previous, &nullifier)?;
+                    ok = groth16_verify(&env, &vk, &proof, &previous, &nullifier, &addr)?;
                 }
             }
         }
@@ -329,6 +336,7 @@ fn groth16_verify(
     proof: &Proof,
     root: &BytesN<32>,
     nullifier: &BytesN<32>,
+    addr: &Fr,
 ) -> Result<bool, Error> {
     if vk.ic.len() != EXPECTED_IC_LEN {
         return Err(Error::MalformedVk);
@@ -338,16 +346,16 @@ fn groth16_verify(
     let a = Bn254G1Affine::from_bytes(proof.a.clone());
     let c = Bn254G1Affine::from_bytes(proof.c.clone());
 
-    // vk_x = IC[0] + root·IC[1] + nullifier·IC[2]
+    // vk_x = IC[0] + root·IC[1] + nullifier·IC[2] + addr·IC[3]
     let ic0 = Bn254G1Affine::from_bytes(vk.ic.get(0).unwrap());
     let ic1 = Bn254G1Affine::from_bytes(vk.ic.get(1).unwrap());
     let ic2 = Bn254G1Affine::from_bytes(vk.ic.get(2).unwrap());
+    let ic3 = Bn254G1Affine::from_bytes(vk.ic.get(3).unwrap());
     let root_s = scalar_be(env, root);
     let null_s = scalar_be(env, nullifier);
-    let vk_x = bn.g1_add(
-        &bn.g1_add(&ic0, &bn.g1_mul(&ic1, &root_s)),
-        &bn.g1_mul(&ic2, &null_s),
-    );
+    let mut vk_x = bn.g1_add(&ic0, &bn.g1_mul(&ic1, &root_s));
+    vk_x = bn.g1_add(&vk_x, &bn.g1_mul(&ic2, &null_s));
+    vk_x = bn.g1_add(&vk_x, &bn.g1_mul(&ic3, addr));
 
     // -A = (X, -Y), via the SDK's native G1 negation.
     let neg_a = -a;
@@ -367,6 +375,21 @@ fn groth16_verify(
 fn scalar_be(env: &Env, b: &BytesN<32>) -> Fr {
     let bytes = Bytes::from_array(env, &b.to_array());
     Fr::from_u256(U256::from_be_bytes(env, &bytes))
+}
+
+/// Bind an address to a scalar: `Fr(sha256(strkey) mod r)`, over the same
+/// strkey bytes `holder.to_string()` produces. veilproof-server derives the
+/// identical value off-chain, so a proof only verifies for its intended holder.
+fn address_field(env: &Env, holder: &Address) -> Fr {
+    let s: String = holder.to_string();
+    let len = s.len() as usize;
+    // Stellar strkeys are 56 chars (accounts, contracts) or 69 (muxed); 128 is
+    // ample headroom.
+    let mut buf = [0u8; 128];
+    s.copy_into_slice(&mut buf[..len]);
+    let bytes = Bytes::from_slice(env, &buf[..len]);
+    let hash = env.crypto().sha256(&bytes);
+    scalar_be(env, &hash.to_bytes())
 }
 
 fn bump(env: &Env, key: &DataKey) {

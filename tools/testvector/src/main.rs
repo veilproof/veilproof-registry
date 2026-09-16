@@ -28,6 +28,7 @@ use ark_relations::r1cs::{ConstraintSynthesizer, ConstraintSystemRef, SynthesisE
 use ark_snark::SNARK;
 use rand::SeedableRng;
 use rand_chacha::ChaCha20Rng;
+use sha2::{Digest, Sha256};
 
 /// MiMC rounds. Enough to be a genuine permutation; the proof's soundness
 /// comes from Groth16, not from this count.
@@ -38,6 +39,19 @@ const DEPTH: usize = 4;
 /// same secret are different hashes.
 const LEAF_DOMAIN: u64 = 1;
 const NULLIFIER_DOMAIN: u64 = 2;
+
+/// The holder address the test vector binds to. The contract derives the same
+/// field element from `holder.to_string()`, so the registry test uses this
+/// exact address. Any valid Stellar strkey works; this is a throwaway one.
+const FIXED_HOLDER: &str = "GBYNOOC3UUF2QBCNIRUEHK2J3JOCDSV2QTLG445GW5ZEENPYDSU33OFQ";
+
+/// Bind a Stellar address to a field element: `Fr(sha256(strkey) mod r)`. The
+/// contract computes the identical value via `env.crypto().sha256` over the
+/// same strkey bytes, reduced mod r — so a proof only verifies for the address
+/// it was generated for.
+fn address_field(strkey: &str) -> Fr {
+    Fr::from_be_bytes_mod_order(&Sha256::digest(strkey.as_bytes()))
+}
 
 /// Deterministic round constants, so the emitted vector is reproducible.
 fn round_constants() -> Vec<Fr> {
@@ -102,6 +116,7 @@ struct MerkleCircuit {
     // public inputs
     root: Option<Fr>,
     nullifier: Option<Fr>,
+    addr: Option<Fr>,
     // private witnesses
     secret: Option<Fr>,
     path_elements: Option<Vec<Fr>>,
@@ -116,6 +131,15 @@ impl ConstraintSynthesizer<Fr> for MerkleCircuit {
         let nullifier = FpVar::new_input(cs.clone(), || {
             self.nullifier.ok_or(SynthesisError::AssignmentMissing)
         })?;
+        // The holder address, bound as a public input. It is not tied to the
+        // witness — the verifier supplies it (derived from the caller) and the
+        // proof only checks out for that value, which is what prevents a proof
+        // being replayed under a different address. One multiplication gate
+        // keeps it a real part of the constraint system.
+        let addr = FpVar::new_input(cs.clone(), || {
+            self.addr.ok_or(SynthesisError::AssignmentMissing)
+        })?;
+        let _addr_bound = &addr * &addr;
         let secret = FpVar::new_witness(cs.clone(), || {
             self.secret.ok_or(SynthesisError::AssignmentMissing)
         })?;
@@ -260,7 +284,7 @@ fn hex_array(bytes: &[u8]) -> String {
     s
 }
 
-fn emit(vk: &VerifyingKey<Bn254>, proof: &Proof<Bn254>, w: &Witness) -> String {
+fn emit(vk: &VerifyingKey<Bn254>, proof: &Proof<Bn254>, w: &Witness, addr: Fr) -> String {
     let mut out = String::new();
     let p = &mut out;
 
@@ -342,6 +366,12 @@ fn emit(vk: &VerifyingKey<Bn254>, proof: &Proof<Bn254>, w: &Witness) -> String {
         hex_array(&fr_be(&w.nullifier))
     )
     .unwrap();
+    writeln!(
+        p,
+        "pub const PUB_ADDR: [u8; 32] = {};",
+        hex_array(&fr_be(&addr))
+    )
+    .unwrap();
 
     out
 }
@@ -353,10 +383,12 @@ fn main() {
     // Reproducible setup + proof.
     let mut rng = ChaCha20Rng::seed_from_u64(0xF00D_BEEF);
 
+    let addr = address_field(FIXED_HOLDER);
     let setup_circuit = MerkleCircuit {
         constants: constants.clone(),
         root: None,
         nullifier: None,
+        addr: None,
         secret: None,
         path_elements: None,
         path_indices: None,
@@ -368,6 +400,7 @@ fn main() {
         constants: constants.clone(),
         root: Some(w.root),
         nullifier: Some(w.nullifier),
+        addr: Some(addr),
         secret: Some(w.secret),
         path_elements: Some(w.path_elements.clone()),
         path_indices: Some(w.path_indices.clone()),
@@ -375,7 +408,7 @@ fn main() {
     let proof = Groth16::<Bn254>::prove(&pk, prove_circuit, &mut rng).expect("prove");
 
     // Self-check with arkworks before trusting the bytes.
-    let public_inputs = vec![w.root, w.nullifier];
+    let public_inputs = vec![w.root, w.nullifier, addr];
     let ok = Groth16::<Bn254>::verify(&vk, &public_inputs, &proof).expect("verify");
     assert!(ok, "arkworks self-verification failed — aborting");
 
@@ -383,7 +416,7 @@ fn main() {
     assert!(!proof.a.infinity && !proof.c.infinity);
     assert!(!vk.alpha_g1.is_zero());
 
-    let src = emit(&vk, &proof, &w);
+    let src = emit(&vk, &proof, &w, addr);
     let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../src/test_vector.rs");
     fs::write(path, src).expect("write test_vector.rs");
     println!("arkworks self-verify: OK");
