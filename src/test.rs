@@ -283,3 +283,33 @@ fn full_lifecycle() {
     );
     assert!(s.client.is_verified(&s.holder, &s.credential));
 }
+
+/// The batch view returns one result per holder, in order, and rejects an
+/// oversized query.
+#[test]
+fn are_verified_batch() {
+    let s = setup();
+    s.client.register_issuer(&s.admin, &s.issuer, &s.credential);
+    s.client
+        .publish_root(&s.issuer, &s.credential, &root(&s.env));
+    s.client.verify_credential(
+        &s.holder,
+        &s.credential,
+        &real_proof(&s.env),
+        &nullifier(&s.env),
+    );
+
+    let other = Address::generate(&s.env);
+    let holders = soroban_sdk::vec![&s.env, s.holder.clone(), other.clone()];
+    let results = s.client.are_verified(&holders, &s.credential);
+    assert_eq!(results.get(0), Some(true)); // the verified holder
+    assert_eq!(results.get(1), Some(false)); // never verified
+
+    // An oversized batch is rejected.
+    let mut big = soroban_sdk::Vec::new(&s.env);
+    for _ in 0..(crate::MAX_BATCH + 1) {
+        big.push_back(Address::generate(&s.env));
+    }
+    let res = s.client.try_are_verified(&big, &s.credential);
+    assert_eq!(res, Err(Ok(Error::BatchTooLarge)));
+}
