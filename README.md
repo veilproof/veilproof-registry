@@ -11,17 +11,6 @@ the underlying credential, prevents the same credential being used to "verify"
 twice under different addresses. Any other contract or party can then read
 `is_verified(address, credential)` as a plain on-chain boolean.
 
-> ## ⚠️ UNAUDITED — experimental
->
-> This contract has **not** been audited. It exercises genuinely new territory:
-> native zero-knowledge proof verification on Soroban, live on mainnet only
-> since Protocol 25 (January 22, 2026). The soundness of the whole system also
-> depends on the soundness of the **circuit** that produced the verifying key
-> (see [Trust model](#trust-model)); the contract can verify that a proof is
-> correctly formed against a given key, but it cannot detect a flawed circuit.
-> Do not use this to protect anything of value without an audit and a reviewed
-> circuit.
-
 ## Why this matters
 
 Compliance credentials — KYC status, accredited-investor status, jurisdiction
