@@ -39,8 +39,8 @@ jobs:
       - name: Test
         run: cargo test
 
-      - name: Install Stellar CLI
-        run: cargo install --locked stellar-cli
-
-      - name: Contract build
-        run: stellar contract build
+      - name: Wasm build
+        # Equivalent to `stellar contract build` for CI's purpose — proves the
+        # contract compiles to the Soroban wasm target — without compiling the
+        # Stellar CLI from source, which is slow and flaky on runners.
+        run: cargo build --locked --release --target wasm32v1-none
