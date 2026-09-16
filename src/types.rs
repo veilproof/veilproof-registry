@@ -39,6 +39,8 @@ pub struct VerifyingKey {
 pub struct IssuerConfig {
     pub issuer: Address,
     pub active: bool,
+    /// The circuit (verifying key) this credential's proofs are checked against.
+    pub circuit: Symbol,
 }
 
 /// The current Merkle root for a credential and the immediately previous one.
@@ -79,8 +81,10 @@ pub struct VerifiedKey {
 pub enum DataKey {
     /// Admin address. Instance storage.
     Admin,
-    /// The fixed verifying key. Instance storage.
-    Vk,
+    /// circuit_name -> VerifyingKey. Persistent. An admin-curated registry of
+    /// circuits; every circuit shares the same public-input schema
+    /// (root, nullifier, addr), so verification logic is identical across them.
+    Circuit(Symbol),
     /// Grace window in seconds for a superseded root. Instance storage.
     Grace,
     /// credential_name -> IssuerConfig. Persistent.
@@ -118,6 +122,10 @@ pub enum Error {
     MalformedVk = 9,
     /// A batch query exceeded the maximum allowed size.
     BatchTooLarge = 10,
+    /// A circuit is already registered under this name.
+    CircuitExists = 11,
+    /// No circuit is registered under this name.
+    CircuitNotFound = 12,
 }
 
 // --- events ---------------------------------------------------------------
@@ -156,4 +164,12 @@ pub struct CredentialVerified {
     pub credential: Symbol,
     pub holder: Address,
     pub timestamp: u64,
+}
+
+/// A circuit (verifying key) was registered.
+#[contractevent(topics = ["circuit"])]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CircuitRegistered {
+    #[topic]
+    pub circuit: Symbol,
 }
