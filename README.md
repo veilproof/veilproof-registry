@@ -128,6 +128,18 @@ different hash) can coexist while the contract's verification logic stays
 identical. Arbitrary user-supplied circuits are out of scope: keys are
 admin-curated.
 
+## Testnet deployment
+
+**Contract ID:** `CC4IXULTDJ5OPE2YOBNIROD2HME2VA7QNK2NDCIUQQ453PZGFZVDMJFR`
+
+[Stellar Expert](https://stellar.expert/explorer/testnet/contract/CC4IXULTDJ5OPE2YOBNIROD2HME2VA7QNK2NDCIUQQ453PZGFZVDMJFR)
+· [Lab](https://lab.stellar.org/r/testnet/contract/CC4IXULTDJ5OPE2YOBNIROD2HME2VA7QNK2NDCIUQQ453PZGFZVDMJFR)
+
+Constructed with an admin and a 3600-second grace window. This is the instance
+[veilproof-web](https://github.com/veilproof/veilproof-web) reads for its
+on-chain verification lookup. Circuits and issuers are registered by the admin
+after deployment — see the API table above.
+
 ## Trust model
 
 - **The circuit is the root of trust.** The contract verifies that a proof is
