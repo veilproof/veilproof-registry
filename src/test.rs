@@ -578,3 +578,41 @@ fn an_accepted_offer_cannot_be_reused() {
         Err(Ok(Error::NotPendingAdmin))
     );
 }
+
+/// Publishes `root` under the fixture credential, then supersedes it with an
+/// unrelated root at `superseded_at`.
+fn publish_then_supersede(s: &Setup, superseded_at: u64) {
+    s.client
+        .register_issuer(&s.admin, &s.issuer, &s.credential, &s.circuit);
+    s.client
+        .publish_root(&s.issuer, &s.credential, &root(&s.env));
+    s.env.ledger().set_timestamp(superseded_at);
+    let other = BytesN::from_array(&s.env, &[9u8; 32]);
+    s.client.publish_root(&s.issuer, &s.credential, &other);
+}
+
+fn try_real_verify(s: &Setup) -> Result<(), Error> {
+    match s.client.try_verify_credential(
+        &s.holder,
+        &s.credential,
+        &real_proof(&s.env),
+        &nullifier(&s.env),
+    ) {
+        Ok(_) => Ok(()),
+        Err(Ok(e)) => Err(e),
+        Err(Err(e)) => panic!("unexpected invoke error: {e:?}"),
+    }
+}
+
+/// The grace window exists for a proof generated just before a root update, so
+/// it has to run from that update. A root that had been live for far longer
+/// than the window still gets its full grace once superseded.
+#[test]
+fn grace_runs_from_the_update_not_the_original_publish() {
+    let s = setup();
+    let superseded_at = s.env.ledger().timestamp() + 10 * GRACE_SECONDS;
+    publish_then_supersede(&s, superseded_at);
+
+    s.env.ledger().set_timestamp(superseded_at + 1);
+    assert_eq!(try_real_verify(&s), Ok(()));
+}

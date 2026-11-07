@@ -54,8 +54,10 @@ pub struct IssuerConfig {
 #[derive(Clone)]
 pub struct RootHistory {
     pub current: BytesN<32>,
+    /// When `current` was published.
     pub current_ts: u64,
     pub previous: Option<BytesN<32>>,
+    /// When `previous` was superseded, which is when its grace window opened.
     pub previous_ts: u64,
 }
 
