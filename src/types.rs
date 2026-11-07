@@ -103,6 +103,9 @@ pub enum DataKey {
     PendingAdmin,
     /// circuit_name -> paused marker. Persistent; absent when not paused.
     Paused(Symbol),
+    /// Whether anyone may claim an unused credential name. Instance storage;
+    /// absent, and so closed, unless the admin opens it.
+    OpenRegistration,
 }
 
 #[contracterror]
@@ -137,6 +140,8 @@ pub enum Error {
     NotPendingAdmin = 13,
     /// The admin has paused verification for this credential's circuit.
     CircuitPaused = 14,
+    /// This registry only accepts issuers the admin registers.
+    RegistrationClosed = 15,
 }
 
 // --- events ---------------------------------------------------------------
@@ -209,6 +214,13 @@ pub struct CircuitPaused {
 pub struct CircuitUnpaused {
     #[topic]
     pub circuit: Symbol,
+}
+
+/// The admin opened or closed self-service credential registration.
+#[contractevent(topics = ["open_reg"])]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct OpenRegistrationSet {
+    pub open: bool,
 }
 
 /// The admin offered the role to a new address, which has not yet accepted.
