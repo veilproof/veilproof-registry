@@ -59,6 +59,7 @@ impl VeilproofRegistry {
         env.storage()
             .instance()
             .set(&DataKey::Grace, &grace_seconds);
+        bump_instance(&env);
     }
 
     /// Admin registers a verifying key under a circuit name. Circuits are
@@ -177,6 +178,8 @@ impl VeilproofRegistry {
         };
         env.storage().persistent().set(&roots_key, &history);
         bump(&env, &roots_key);
+        bump(&env, &key);
+        bump_instance(&env);
         RootPublished {
             credential,
             root: merkle_root,
@@ -204,20 +207,23 @@ impl VeilproofRegistry {
 
         // Resolve the credential's issuer config, then the verifying key for
         // its circuit. A credential with no issuer has no circuit either.
+        let issuer_key = DataKey::Issuer(credential.clone());
         let cfg: IssuerConfig = env
             .storage()
             .persistent()
-            .get(&DataKey::Issuer(credential.clone()))
+            .get(&issuer_key)
             .ok_or(Error::IssuerNotFound)?;
+        let circuit_key = DataKey::Circuit(cfg.circuit.clone());
         let vk: VerifyingKey = env
             .storage()
             .persistent()
-            .get(&DataKey::Circuit(cfg.circuit))
+            .get(&circuit_key)
             .ok_or(Error::CircuitNotFound)?;
+        let roots_key = DataKey::Roots(credential.clone());
         let history: RootHistory = env
             .storage()
             .persistent()
-            .get(&DataKey::Roots(credential.clone()))
+            .get(&roots_key)
             .ok_or(Error::NoRoot)?;
 
         // Replay check first — cheaper than a pairing, and decisive.
@@ -264,6 +270,12 @@ impl VeilproofRegistry {
         });
         env.storage().persistent().set(&verified_key, &now);
         bump(&env, &verified_key);
+
+        // Everything verification depends on stays alive while it is in use.
+        bump(&env, &issuer_key);
+        bump(&env, &circuit_key);
+        bump(&env, &roots_key);
+        bump_instance(&env);
 
         CredentialVerified {
             credential,
@@ -445,4 +457,13 @@ fn bump(env: &Env, key: &DataKey) {
     env.storage()
         .persistent()
         .extend_ttl(key, PERSIST_THRESHOLD, PERSIST_TTL);
+}
+
+/// Extend the contract instance (and with it the admin and grace values) along
+/// with its code. Nothing else does this: without it a registry in daily use
+/// would still lapse once its instance TTL ran out.
+fn bump_instance(env: &Env) {
+    env.storage()
+        .instance()
+        .extend_ttl(PERSIST_THRESHOLD, PERSIST_TTL);
 }

@@ -180,6 +180,13 @@ A used nullifier can therefore be temporarily archived but never reset to
 and restoration brings back `used = true`. The TTL bump reduces the need for
 restoration in practice; the archival guarantee is the backstop.
 
+The contract instance, which holds the admin and the grace window, is extended
+along with its code on construction and on every `publish_root` and
+`verify_credential`. Those two calls also renew the issuer, circuit, and root
+entries they read, so a credential in steady use keeps everything it depends on
+alive. An idle registry still lapses after about 90 days; its entries are then
+archived rather than lost, and have to be restored before use.
+
 ## Toolchain
 
 Verified versions used to build and test this contract:
