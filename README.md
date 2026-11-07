@@ -123,12 +123,13 @@ to `bn254.pairing_check(vp1, vp2)` as the two vectors
 | `propose_admin(admin, new_admin)`                              | admin  | Offer the admin role; the admin keeps it until accepted |
 | `accept_admin(new_admin)`                                      | new admin | Take the offered role; the old admin loses it     |
 | `register_circuit(admin, circuit, vk)`                         | admin  | Register a verifying key under a circuit name (register-once) |
+| `pause_circuit(admin, circuit)`, `unpause_circuit(admin, circuit)` | admin | Stop or resume `verify_credential` on a circuit; reads are unaffected |
 | `register_issuer(admin, issuer, credential, circuit)`          | admin  | Authorize an issuer for a credential, bound to a circuit |
 | `revoke_issuer(admin, credential)`                             | admin  | Deactivate that issuer                               |
 | `publish_root(issuer, credential, merkle_root)`                | issuer | Publish/update the Merkle root (prior root kept)     |
 | `verify_credential(holder, credential, proof, nullifier)`      | holder | Verify a proof, burn the nullifier, record the holder |
 | `is_verified(holder, credential) -> bool`                      | view   | The on-chain compliance boolean                      |
-| `verified_at`, `is_nullifier_used`, `current_root`, `issuer_of`, `circuit_of`, `has_circuit`, `admin`, `pending_admin` | view | Registry reads |
+| `verified_at`, `is_nullifier_used`, `current_root`, `issuer_of`, `circuit_of`, `has_circuit`, `is_circuit_paused`, `admin`, `pending_admin` | view | Registry reads |
 
 Every registered circuit shares the same **public-input schema**
 (root, nullifier, addr), so different circuits (e.g. a deeper tree or a
@@ -163,6 +164,11 @@ after deployment — see the API table above.
   means registering a new name and pointing issuers at it — so verification can
   never be quietly redirected. All circuits share one public-input schema, so
   the verification code is identical across them.
+- **A circuit can be paused, not repaired.** If a circuit proves unsound, the
+  admin can stop new verifications on it with `pause_circuit`. Statuses already
+  recorded stay readable and are not undone, because the contract cannot tell
+  which of them were forged. Consumers can compare `verified_at` with the time
+  of the pause.
 - **The issuer is trusted for set membership.** Whoever the admin authorizes as
   issuer defines "who is in the set" by publishing roots. The ZK property is
   that holders prove membership *without revealing which member*; it is not a

@@ -101,6 +101,8 @@ pub enum DataKey {
     /// The address the admin has offered the role to. Instance storage; absent
     /// when no handover is in progress.
     PendingAdmin,
+    /// circuit_name -> paused marker. Persistent; absent when not paused.
+    Paused(Symbol),
 }
 
 #[contracterror]
@@ -133,6 +135,8 @@ pub enum Error {
     CircuitNotFound = 12,
     /// No admin handover is in progress, or the caller is not its recipient.
     NotPendingAdmin = 13,
+    /// The admin has paused verification for this credential's circuit.
+    CircuitPaused = 14,
 }
 
 // --- events ---------------------------------------------------------------
@@ -177,6 +181,22 @@ pub struct CredentialVerified {
 #[contractevent(topics = ["circuit"])]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct CircuitRegistered {
+    #[topic]
+    pub circuit: Symbol,
+}
+
+/// The admin paused verification for a circuit.
+#[contractevent(topics = ["paused"])]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CircuitPaused {
+    #[topic]
+    pub circuit: Symbol,
+}
+
+/// The admin resumed verification for a circuit.
+#[contractevent(topics = ["unpaused"])]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CircuitUnpaused {
     #[topic]
     pub circuit: Symbol,
 }
