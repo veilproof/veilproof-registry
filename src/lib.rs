@@ -29,7 +29,7 @@ use soroban_sdk::{
 use types::{
     AdminChanged, AdminProposed, CircuitPaused, CircuitRegistered, CircuitUnpaused,
     CredentialVerified, DataKey, Error, IssuerConfig, IssuerRegistered, IssuerRevoked,
-    NullifierKey, Proof, RootHistory, RootPublished, VerifiedKey, VerifyingKey,
+    IssuerRotated, NullifierKey, Proof, RootHistory, RootPublished, VerifiedKey, VerifyingKey,
 };
 
 /// Public inputs for the fixed circuit are (root, nullifier, addr), so the IC
@@ -212,8 +212,44 @@ impl VeilproofRegistry {
         Ok(())
     }
 
+    /// Admin replaces the issuer for `credential` with `new_issuer`, which also
+    /// reactivates a revoked credential. Published roots and verified holders
+    /// are untouched, so nobody has to re-verify over an operational event.
+    ///
+    /// Admin-only: rotation is the response to a compromised issuer key, and an
+    /// attacker holding that key must not be able to rotate it to themselves.
+    /// A root the old key published stays valid until the new issuer replaces
+    /// it, so after a compromise the new issuer should publish straight away.
+    pub fn rotate_issuer(
+        env: Env,
+        admin: Address,
+        credential: Symbol,
+        new_issuer: Address,
+    ) -> Result<(), Error> {
+        Self::require_admin(&env, &admin)?;
+        let key = DataKey::Issuer(credential.clone());
+        let mut cfg: IssuerConfig = env
+            .storage()
+            .persistent()
+            .get(&key)
+            .ok_or(Error::IssuerNotFound)?;
+        let previous = cfg.issuer;
+        cfg.issuer = new_issuer.clone();
+        cfg.active = true;
+        env.storage().persistent().set(&key, &cfg);
+        bump(&env, &key);
+        IssuerRotated {
+            credential,
+            previous,
+            issuer: new_issuer,
+        }
+        .publish(&env);
+        Ok(())
+    }
+
     /// Admin deactivates the issuer for `credential`. Existing roots remain
-    /// readable, but no new roots may be published until re-registered.
+    /// readable and proofs against them still verify, but no new roots may be
+    /// published until [`Self::rotate_issuer`] names an issuer again.
     pub fn revoke_issuer(env: Env, admin: Address, credential: Symbol) -> Result<(), Error> {
         Self::require_admin(&env, &admin)?;
         let key = DataKey::Issuer(credential.clone());
