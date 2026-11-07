@@ -126,6 +126,7 @@ to `bn254.pairing_check(vp1, vp2)` as the two vectors
 | `pause_circuit(admin, circuit)`, `unpause_circuit(admin, circuit)` | admin | Stop or resume `verify_credential` on a circuit; reads are unaffected |
 | `register_issuer(admin, issuer, credential, circuit)`          | admin  | Authorize an issuer for a credential, bound to a circuit |
 | `revoke_issuer(admin, credential)`                             | admin  | Deactivate that issuer                               |
+| `rotate_issuer(admin, credential, new_issuer)`                 | admin  | Replace the issuer, keeping roots and verified holders |
 | `publish_root(issuer, credential, merkle_root)`                | issuer | Publish/update the Merkle root (prior root kept)     |
 | `verify_credential(holder, credential, proof, nullifier)`      | holder | Verify a proof, burn the nullifier, record the holder |
 | `is_verified(holder, credential) -> bool`                      | view   | The on-chain compliance boolean                      |
@@ -173,6 +174,10 @@ after deployment — see the API table above.
   issuer defines "who is in the set" by publishing roots. The ZK property is
   that holders prove membership *without revealing which member*; it is not a
   claim that the issuer's set is itself correct.
+- **Issuer keys can be replaced by the admin only.** `rotate_issuer` is for a
+  lost or compromised key, so the key itself cannot authorize it. Roots and
+  verified holders survive rotation. A credential cannot be registered twice,
+  even after `revoke_issuer`, so rotation is also how a revoked one comes back.
 - **The proof is bound to the holder address.** The public inputs are
   `(root, nullifier, addr)`, where `addr = Fr(sha256(strkey) mod r)` is derived
   by the contract from the caller. A proof made for one holder therefore cannot
