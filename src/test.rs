@@ -810,3 +810,91 @@ fn pause_is_admin_only_and_checks_the_circuit() {
         Err(Ok(Error::CircuitNotFound))
     );
 }
+
+/// The behaviour rotation exists to fix: a revoked credential cannot simply be
+/// registered again, and its roots survive the attempt.
+#[test]
+fn revoked_credential_cannot_be_reregistered() {
+    let s = setup();
+    ready_to_verify(&s);
+    s.client.revoke_issuer(&s.admin, &s.credential);
+
+    let replacement = Address::generate(&s.env);
+    assert_eq!(
+        s.client
+            .try_register_issuer(&s.admin, &replacement, &s.credential, &s.circuit),
+        Err(Ok(Error::IssuerExists))
+    );
+    assert_eq!(s.client.current_root(&s.credential), Some(root(&s.env)));
+}
+
+/// Revoking stops new roots, not proofs against the root already published.
+#[test]
+fn revoked_issuer_root_still_verifies() {
+    let s = setup();
+    ready_to_verify(&s);
+    s.client.revoke_issuer(&s.admin, &s.credential);
+    assert_eq!(try_real_verify(&s), Ok(()));
+}
+
+/// Rotation hands over publishing, and keeps roots and verified holders.
+#[test]
+fn rotation_preserves_roots_and_statuses() {
+    let s = setup();
+    ready_to_verify(&s);
+    assert_eq!(try_real_verify(&s), Ok(()));
+
+    let replacement = Address::generate(&s.env);
+    s.client
+        .rotate_issuer(&s.admin, &s.credential, &replacement);
+
+    assert_eq!(s.client.issuer_of(&s.credential), Some(replacement.clone()));
+    assert_eq!(s.client.current_root(&s.credential), Some(root(&s.env)));
+    assert!(s.client.is_verified(&s.holder, &s.credential));
+
+    let next = BytesN::from_array(&s.env, &[9u8; 32]);
+    assert_eq!(
+        s.client.try_publish_root(&s.issuer, &s.credential, &next),
+        Err(Ok(Error::NotIssuer))
+    );
+    s.client.publish_root(&replacement, &s.credential, &next);
+    assert_eq!(s.client.current_root(&s.credential), Some(next));
+}
+
+/// Rotation is how a revoked credential comes back.
+#[test]
+fn rotation_reactivates_a_revoked_credential() {
+    let s = setup();
+    ready_to_verify(&s);
+    s.client.revoke_issuer(&s.admin, &s.credential);
+
+    let replacement = Address::generate(&s.env);
+    s.client
+        .rotate_issuer(&s.admin, &s.credential, &replacement);
+    let next = BytesN::from_array(&s.env, &[9u8; 32]);
+    s.client.publish_root(&replacement, &s.credential, &next);
+    assert_eq!(s.client.current_root(&s.credential), Some(next));
+}
+
+/// Neither an outsider nor the current issuer can rotate, and the credential
+/// has to exist.
+#[test]
+fn rotation_is_admin_only() {
+    let s = setup();
+    ready_to_verify(&s);
+    let replacement = Address::generate(&s.env);
+    for caller in [Address::generate(&s.env), s.issuer.clone()] {
+        assert_eq!(
+            s.client
+                .try_rotate_issuer(&caller, &s.credential, &replacement),
+            Err(Ok(Error::NotAdmin))
+        );
+    }
+    assert_eq!(s.client.issuer_of(&s.credential), Some(s.issuer.clone()));
+
+    let missing = Symbol::new(&s.env, "nope");
+    assert_eq!(
+        s.client.try_rotate_issuer(&s.admin, &missing, &replacement),
+        Err(Ok(Error::IssuerNotFound))
+    );
+}
