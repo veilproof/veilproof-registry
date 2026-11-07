@@ -15,10 +15,9 @@ pub struct Proof {
     pub c: BytesN<64>,
 }
 
-/// The Groth16 verifying key for the one fixed circuit this contract knows
-/// (Merkle-membership + nullifier). Fixed at contract construction and never
-/// updatable: a different circuit is a different verifying key and a breaking
-/// change that requires a new deployment. See the README trust model.
+/// A Groth16 verifying key, registered under a circuit name with
+/// `register_circuit`. A name can never be repointed at a different key: a new
+/// key means a new name. See the README trust model.
 #[contracttype]
 #[derive(Clone)]
 pub struct VerifyingKey {
@@ -27,8 +26,8 @@ pub struct VerifyingKey {
     pub gamma_g2: BytesN<128>,
     pub delta_g2: BytesN<128>,
     /// gamma_abc_g1 / "IC": one G1 point per public input, plus a leading
-    /// constant term. For this circuit the public inputs are (root,
-    /// nullifier), so `ic` has length 3.
+    /// constant term. The public inputs are (root, nullifier, addr), so `ic` has
+    /// length 4.
     pub ic: Vec<BytesN<64>>,
 }
 

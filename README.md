@@ -140,6 +140,30 @@ different hash) can coexist while the contract's verification logic stays
 identical. Arbitrary user-supplied circuits are out of scope: keys are
 admin-curated.
 
+## Events
+
+Every state change emits an event, so the registry can be indexed without reading
+storage. Each event's first topic is its name below. Fields marked *topic* can be
+filtered on; the rest are in the event's data as a map keyed by field name.
+
+| Event (first topic) | Topics after the name | Data | Emitted by |
+| ------------------- | --------------------- | ---- | ---------- |
+| `circuit` | `circuit` | — | `register_circuit` |
+| `paused` | `circuit` | — | `pause_circuit` |
+| `unpaused` | `circuit` | — | `unpause_circuit` |
+| `issuer` | `credential` | `issuer` | `register_issuer`, `claim_credential` |
+| `revoked` | `credential` | — | `revoke_issuer` |
+| `rotated` | `credential` | `previous`, `issuer` | `rotate_issuer` |
+| `root` | `credential` | `root` | `publish_root` |
+| `verified` | `credential` | `holder`, `timestamp` | `verify_credential` |
+| `open_reg` | — | `open` | `set_open_registration` |
+| `admin_prop` | — | `admin`, `proposed` | `propose_admin` |
+| `admin_set` | — | `previous`, `admin` | `accept_admin` |
+
+Events show history, and storage is authoritative for current state. RPC nodes
+keep events only for a limited window, so an indexer has to keep up or backfill
+from an archive.
+
 ## Testnet deployment
 
 **Contract ID:** `CDTKXCMHMNRIOBO5IFMZIYT3FI4U72T2IYSBMA7S3W4AGPVIA5I4GQRH`
