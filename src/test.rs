@@ -1,8 +1,9 @@
 #![cfg(test)]
 
 use crate::test_vector as tv;
-use crate::types::{Error, Proof, VerifyingKey};
+use crate::types::{DataKey, Error, Proof, VerifyingKey};
 use crate::{VeilproofRegistry, VeilproofRegistryClient};
+use soroban_sdk::testutils::storage::{Instance as _, Persistent as _};
 use soroban_sdk::testutils::{Address as _, Ledger as _};
 use soroban_sdk::{vec, Address, BytesN, Env, String, Symbol};
 
@@ -416,4 +417,76 @@ fn second_circuit_verifies() {
         &nullifier(&s.env),
     );
     assert!(s.client.is_verified(&s.holder, &credential2));
+}
+
+/// Ledgers until the contract instance's TTL runs out.
+fn instance_ttl(s: &Setup) -> u32 {
+    s.env
+        .as_contract(&s.client.address, || s.env.storage().instance().get_ttl())
+}
+
+/// Moves the ledger forward without letting any entry expire.
+fn advance_ledgers(s: &Setup, ledgers: u32) {
+    let seq = s.env.ledger().sequence();
+    s.env.ledger().set_sequence_number(seq + ledgers);
+}
+
+/// Ledgers per day at Soroban's 5 second close time, and the TTLs the contract
+/// is expected to maintain.
+const DAY: u32 = 17_280;
+
+/// The instance holds the admin and the grace window, so it has to outlive its
+/// default TTL for as long as the registry is in use.
+#[test]
+fn construction_extends_the_instance() {
+    let s = setup();
+    assert!(instance_ttl(&s) >= 89 * DAY);
+}
+
+/// Publishing a root renews the instance once it nears the threshold.
+#[test]
+fn publishing_extends_the_instance() {
+    let s = setup();
+    s.client
+        .register_issuer(&s.admin, &s.issuer, &s.credential, &s.circuit);
+
+    advance_ledgers(&s, 65 * DAY);
+    assert!(instance_ttl(&s) < 30 * DAY);
+
+    s.client
+        .publish_root(&s.issuer, &s.credential, &root(&s.env));
+    assert!(instance_ttl(&s) >= 89 * DAY);
+}
+
+/// Verifying renews the instance and the entries verification reads, so a
+/// credential in steady use cannot lose its issuer, circuit, or root.
+#[test]
+fn verifying_extends_what_it_reads() {
+    let s = setup();
+    s.client
+        .register_issuer(&s.admin, &s.issuer, &s.credential, &s.circuit);
+    s.client
+        .publish_root(&s.issuer, &s.credential, &root(&s.env));
+
+    advance_ledgers(&s, 65 * DAY);
+    s.client.verify_credential(
+        &s.holder,
+        &s.credential,
+        &real_proof(&s.env),
+        &nullifier(&s.env),
+    );
+
+    let (issuer_ttl, circuit_ttl, roots_ttl) = s.env.as_contract(&s.client.address, || {
+        let storage = s.env.storage();
+        let persistent = storage.persistent();
+        (
+            persistent.get_ttl(&DataKey::Issuer(s.credential.clone())),
+            persistent.get_ttl(&DataKey::Circuit(s.circuit.clone())),
+            persistent.get_ttl(&DataKey::Roots(s.credential.clone())),
+        )
+    });
+    assert!(issuer_ttl >= 89 * DAY);
+    assert!(circuit_ttl >= 89 * DAY);
+    assert!(roots_ttl >= 89 * DAY);
+    assert!(instance_ttl(&s) >= 89 * DAY);
 }
