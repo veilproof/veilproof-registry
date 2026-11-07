@@ -27,9 +27,9 @@ use soroban_sdk::{
 };
 
 use types::{
-    AdminChanged, AdminProposed, CircuitRegistered, CredentialVerified, DataKey, Error,
-    IssuerConfig, IssuerRegistered, IssuerRevoked, NullifierKey, Proof, RootHistory, RootPublished,
-    VerifiedKey, VerifyingKey,
+    AdminChanged, AdminProposed, CircuitPaused, CircuitRegistered, CircuitUnpaused,
+    CredentialVerified, DataKey, Error, IssuerConfig, IssuerRegistered, IssuerRevoked,
+    NullifierKey, Proof, RootHistory, RootPublished, VerifiedKey, VerifyingKey,
 };
 
 /// Public inputs for the fixed circuit are (root, nullifier, addr), so the IC
@@ -139,6 +139,42 @@ impl VeilproofRegistry {
         env.storage().persistent().set(&key, &vk);
         bump(&env, &key);
         CircuitRegistered { circuit }.publish(&env);
+        Ok(())
+    }
+
+    /// Admin stops `verify_credential` for every credential on `circuit`. This
+    /// is the response to a soundness bug: if a circuit's proofs can be forged,
+    /// each new verification may be false. Existing statuses stay readable, so
+    /// consumers do not break, and they can check `verified_at` against the time
+    /// of the pause.
+    ///
+    /// Scoped to the circuit because that is what a soundness bug is scoped to:
+    /// per-credential would need one call per issuer in an emergency, and a
+    /// global switch would halt circuits that are not affected. Publishing roots
+    /// stays open, since a root confers nothing without a proof.
+    pub fn pause_circuit(env: Env, admin: Address, circuit: Symbol) -> Result<(), Error> {
+        Self::require_admin(&env, &admin)?;
+        if !env
+            .storage()
+            .persistent()
+            .has(&DataKey::Circuit(circuit.clone()))
+        {
+            return Err(Error::CircuitNotFound);
+        }
+        let key = DataKey::Paused(circuit.clone());
+        env.storage().persistent().set(&key, &true);
+        bump(&env, &key);
+        CircuitPaused { circuit }.publish(&env);
+        Ok(())
+    }
+
+    /// Admin resumes verification for `circuit`.
+    pub fn unpause_circuit(env: Env, admin: Address, circuit: Symbol) -> Result<(), Error> {
+        Self::require_admin(&env, &admin)?;
+        env.storage()
+            .persistent()
+            .remove(&DataKey::Paused(circuit.clone()));
+        CircuitUnpaused { circuit }.publish(&env);
         Ok(())
     }
 
@@ -265,6 +301,13 @@ impl VeilproofRegistry {
             .persistent()
             .get(&issuer_key)
             .ok_or(Error::IssuerNotFound)?;
+        if env
+            .storage()
+            .persistent()
+            .has(&DataKey::Paused(cfg.circuit.clone()))
+        {
+            return Err(Error::CircuitPaused);
+        }
         let circuit_key = DataKey::Circuit(cfg.circuit.clone());
         let vk: VerifyingKey = env
             .storage()
@@ -411,6 +454,11 @@ impl VeilproofRegistry {
     /// Whether a circuit name has a registered verifying key.
     pub fn has_circuit(env: Env, circuit: Symbol) -> bool {
         env.storage().persistent().has(&DataKey::Circuit(circuit))
+    }
+
+    /// Whether the admin has paused verification for a circuit.
+    pub fn is_circuit_paused(env: Env, circuit: Symbol) -> bool {
+        env.storage().persistent().has(&DataKey::Paused(circuit))
     }
 
     pub fn admin(env: Env) -> Option<Address> {
