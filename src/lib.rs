@@ -219,7 +219,7 @@ impl VeilproofRegistry {
                 current: merkle_root.clone(),
                 current_ts: now,
                 previous: Some(prev.current),
-                previous_ts: prev.current_ts,
+                previous_ts: now,
             },
             None => RootHistory {
                 current: merkle_root.clone(),

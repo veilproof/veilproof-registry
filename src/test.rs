@@ -578,3 +578,137 @@ fn an_accepted_offer_cannot_be_reused() {
         Err(Ok(Error::NotPendingAdmin))
     );
 }
+
+/// Publishes `root` under the fixture credential, then supersedes it with an
+/// unrelated root at `superseded_at`.
+fn publish_then_supersede(s: &Setup, superseded_at: u64) {
+    s.client
+        .register_issuer(&s.admin, &s.issuer, &s.credential, &s.circuit);
+    s.client
+        .publish_root(&s.issuer, &s.credential, &root(&s.env));
+    s.env.ledger().set_timestamp(superseded_at);
+    let other = BytesN::from_array(&s.env, &[9u8; 32]);
+    s.client.publish_root(&s.issuer, &s.credential, &other);
+}
+
+fn try_real_verify(s: &Setup) -> Result<(), Error> {
+    match s.client.try_verify_credential(
+        &s.holder,
+        &s.credential,
+        &real_proof(&s.env),
+        &nullifier(&s.env),
+    ) {
+        Ok(_) => Ok(()),
+        Err(Ok(e)) => Err(e),
+        Err(Err(e)) => panic!("unexpected invoke error: {e:?}"),
+    }
+}
+
+/// The grace window exists for a proof generated just before a root update, so
+/// it has to run from that update. A root that had been live for far longer
+/// than the window still gets its full grace once superseded.
+#[test]
+fn grace_runs_from_the_update_not_the_original_publish() {
+    let s = setup();
+    let superseded_at = s.env.ledger().timestamp() + 10 * GRACE_SECONDS;
+    publish_then_supersede(&s, superseded_at);
+
+    s.env.ledger().set_timestamp(superseded_at + 1);
+    assert_eq!(try_real_verify(&s), Ok(()));
+}
+
+/// The window is inclusive: the last valid second is `superseded + grace`.
+#[test]
+fn grace_boundary_is_inclusive() {
+    let s = setup();
+    let superseded_at = s.env.ledger().timestamp() + 100;
+    publish_then_supersede(&s, superseded_at);
+
+    s.env.ledger().set_timestamp(superseded_at + GRACE_SECONDS);
+    assert_eq!(try_real_verify(&s), Ok(()));
+}
+
+/// One second past the boundary, the old root is no longer accepted.
+#[test]
+fn grace_ends_one_second_after_the_boundary() {
+    let s = setup();
+    let superseded_at = s.env.ledger().timestamp() + 100;
+    publish_then_supersede(&s, superseded_at);
+
+    s.env
+        .ledger()
+        .set_timestamp(superseded_at + GRACE_SECONDS + 1);
+    assert_eq!(try_real_verify(&s), Err(Error::ProofInvalid));
+}
+
+/// A proof against the current root is unaffected by any amount of elapsed time.
+#[test]
+fn current_root_never_ages_out() {
+    let s = setup();
+    s.client
+        .register_issuer(&s.admin, &s.issuer, &s.credential, &s.circuit);
+    s.client
+        .publish_root(&s.issuer, &s.credential, &root(&s.env));
+    s.env
+        .ledger()
+        .set_timestamp(s.env.ledger().timestamp() + 1000 * GRACE_SECONDS);
+    assert_eq!(try_real_verify(&s), Ok(()));
+}
+
+/// Only one previous root is retained. Two updates inside one window therefore
+/// drop the older root at once, and this is deliberate: it bounds verification
+/// to two pairing checks. An issuer updating in quick succession should expect
+/// to invalidate proofs against the root before last.
+#[test]
+fn second_update_in_a_window_drops_the_older_root() {
+    let s = setup();
+    let superseded_at = s.env.ledger().timestamp() + 100;
+    publish_then_supersede(&s, superseded_at);
+
+    s.env.ledger().set_timestamp(superseded_at + 1);
+    let third = BytesN::from_array(&s.env, &[10u8; 32]);
+    s.client.publish_root(&s.issuer, &s.credential, &third);
+
+    assert_eq!(try_real_verify(&s), Err(Error::ProofInvalid));
+}
+
+/// Republishing the root that is already current keeps it valid as the current
+/// root, so no window applies to it.
+#[test]
+fn republishing_the_same_root_keeps_it_current() {
+    let s = setup();
+    s.client
+        .register_issuer(&s.admin, &s.issuer, &s.credential, &s.circuit);
+    s.client
+        .publish_root(&s.issuer, &s.credential, &root(&s.env));
+    s.client
+        .publish_root(&s.issuer, &s.credential, &root(&s.env));
+    s.env
+        .ledger()
+        .set_timestamp(s.env.ledger().timestamp() + 1000 * GRACE_SECONDS);
+    assert_eq!(try_real_verify(&s), Ok(()));
+}
+
+/// A window so large it would overflow saturates instead of trapping.
+#[test]
+fn enormous_grace_saturates_rather_than_overflows() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let admin = Address::generate(&env);
+    let issuer = Address::generate(&env);
+    let holder = Address::from_string(&String::from_str(&env, FIXED_HOLDER));
+    let credential = Symbol::new(&env, "kyc");
+    let circuit = Symbol::new(&env, "membership");
+    let contract_id = env.register(VeilproofRegistry, (admin.clone(), u64::MAX));
+    let client = VeilproofRegistryClient::new(&env, &contract_id);
+    client.register_circuit(&admin, &circuit, &verifying_key(&env));
+    client.register_issuer(&admin, &issuer, &credential, &circuit);
+    client.publish_root(&issuer, &credential, &root(&env));
+
+    env.ledger().set_timestamp(env.ledger().timestamp() + 100);
+    let other = BytesN::from_array(&env, &[9u8; 32]);
+    client.publish_root(&issuer, &credential, &other);
+
+    client.verify_credential(&holder, &credential, &real_proof(&env), &nullifier(&env));
+    assert!(client.is_verified(&holder, &credential));
+}
