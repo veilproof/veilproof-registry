@@ -1,0 +1,9 @@
+{
+  "name": "veilproof-registry-scripts",
+  "private": true,
+  "type": "module",
+  "description": "Deploys veilproof-registry to testnet and exercises it end to end.",
+  "dependencies": {
+    "@stellar/stellar-sdk": "^17.4.0"
+  }
+}
