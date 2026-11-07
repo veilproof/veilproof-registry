@@ -27,8 +27,9 @@ use soroban_sdk::{
 };
 
 use types::{
-    CircuitRegistered, CredentialVerified, DataKey, Error, IssuerConfig, IssuerRegistered,
-    IssuerRevoked, NullifierKey, Proof, RootHistory, RootPublished, VerifiedKey, VerifyingKey,
+    AdminChanged, AdminProposed, CircuitRegistered, CredentialVerified, DataKey, Error,
+    IssuerConfig, IssuerRegistered, IssuerRevoked, NullifierKey, Proof, RootHistory, RootPublished,
+    VerifiedKey, VerifyingKey,
 };
 
 /// Public inputs for the fixed circuit are (root, nullifier, addr), so the IC
@@ -60,6 +61,57 @@ impl VeilproofRegistry {
             .instance()
             .set(&DataKey::Grace, &grace_seconds);
         bump_instance(&env);
+    }
+
+    /// Admin offers the role to `new_admin`, who must call
+    /// [`Self::accept_admin`] to take it. The current admin keeps every
+    /// privilege until then, so a mistyped address costs nothing: propose again
+    /// and the earlier offer is replaced.
+    ///
+    /// The handover is two-step because the failure it exists to prevent is
+    /// losing the admin role, and a one-step transfer to an address nobody
+    /// controls would do exactly that, permanently.
+    pub fn propose_admin(env: Env, admin: Address, new_admin: Address) -> Result<(), Error> {
+        Self::require_admin(&env, &admin)?;
+        env.storage()
+            .instance()
+            .set(&DataKey::PendingAdmin, &new_admin);
+        bump_instance(&env);
+        AdminProposed {
+            admin,
+            proposed: new_admin,
+        }
+        .publish(&env);
+        Ok(())
+    }
+
+    /// The proposed address takes the admin role. The previous admin loses all
+    /// privilege in the same call.
+    pub fn accept_admin(env: Env, new_admin: Address) -> Result<(), Error> {
+        let pending: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::PendingAdmin)
+            .ok_or(Error::NotPendingAdmin)?;
+        if pending != new_admin {
+            return Err(Error::NotPendingAdmin);
+        }
+        new_admin.require_auth();
+
+        let previous: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::Admin)
+            .ok_or(Error::NotInitialized)?;
+        env.storage().instance().set(&DataKey::Admin, &new_admin);
+        env.storage().instance().remove(&DataKey::PendingAdmin);
+        bump_instance(&env);
+        AdminChanged {
+            previous,
+            admin: new_admin,
+        }
+        .publish(&env);
+        Ok(())
     }
 
     /// Admin registers a verifying key under a circuit name. Circuits are
@@ -363,6 +415,11 @@ impl VeilproofRegistry {
 
     pub fn admin(env: Env) -> Option<Address> {
         env.storage().instance().get(&DataKey::Admin)
+    }
+
+    /// The address offered the admin role and yet to accept it, if any.
+    pub fn pending_admin(env: Env) -> Option<Address> {
+        env.storage().instance().get(&DataKey::PendingAdmin)
     }
 
     // --- internal ------------------------------------------------------

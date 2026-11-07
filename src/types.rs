@@ -96,6 +96,9 @@ pub enum DataKey {
     Nullifier(NullifierKey),
     /// holder+credential -> unix timestamp of verification. Persistent.
     Verified(VerifiedKey),
+    /// The address the admin has offered the role to. Instance storage; absent
+    /// when no handover is in progress.
+    PendingAdmin,
 }
 
 #[contracterror]
@@ -126,6 +129,8 @@ pub enum Error {
     CircuitExists = 11,
     /// No circuit is registered under this name.
     CircuitNotFound = 12,
+    /// No admin handover is in progress, or the caller is not its recipient.
+    NotPendingAdmin = 13,
 }
 
 // --- events ---------------------------------------------------------------
@@ -172,4 +177,20 @@ pub struct CredentialVerified {
 pub struct CircuitRegistered {
     #[topic]
     pub circuit: Symbol,
+}
+
+/// The admin offered the role to a new address, which has not yet accepted.
+#[contractevent(topics = ["admin_prop"])]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct AdminProposed {
+    pub admin: Address,
+    pub proposed: Address,
+}
+
+/// The proposed address accepted, and now holds the admin role.
+#[contractevent(topics = ["admin_set"])]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct AdminChanged {
+    pub previous: Address,
+    pub admin: Address,
 }
