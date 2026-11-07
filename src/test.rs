@@ -898,3 +898,93 @@ fn rotation_is_admin_only() {
         Err(Ok(Error::IssuerNotFound))
     );
 }
+
+/// Registration is closed unless the admin opens it, and closing it again takes
+/// effect immediately.
+#[test]
+fn claiming_needs_open_registration() {
+    let s = setup();
+    assert!(!s.client.open_registration());
+    assert_eq!(
+        s.client
+            .try_claim_credential(&s.issuer, &s.credential, &s.circuit),
+        Err(Ok(Error::RegistrationClosed))
+    );
+
+    s.client.set_open_registration(&s.admin, &true);
+    assert!(s.client.open_registration());
+    s.client
+        .claim_credential(&s.issuer, &s.credential, &s.circuit);
+    assert_eq!(s.client.issuer_of(&s.credential), Some(s.issuer.clone()));
+
+    s.client.set_open_registration(&s.admin, &false);
+    let aml = Symbol::new(&s.env, "aml");
+    assert_eq!(
+        s.client.try_claim_credential(&s.issuer, &aml, &s.circuit),
+        Err(Ok(Error::RegistrationClosed))
+    );
+}
+
+/// A claimed credential runs the same flow as an admin-registered one.
+#[test]
+fn claimed_credential_verifies_a_real_proof() {
+    let s = setup();
+    s.client.set_open_registration(&s.admin, &true);
+    s.client
+        .claim_credential(&s.issuer, &s.credential, &s.circuit);
+    s.client
+        .publish_root(&s.issuer, &s.credential, &root(&s.env));
+    assert_eq!(try_real_verify(&s), Ok(()));
+    assert!(s.client.is_verified(&s.holder, &s.credential));
+}
+
+/// A name already taken cannot be claimed away from its issuer, and a claim
+/// must name a real circuit.
+#[test]
+fn claims_cannot_take_a_name_or_invent_a_circuit() {
+    let s = setup();
+    s.client.set_open_registration(&s.admin, &true);
+    s.client
+        .register_issuer(&s.admin, &s.issuer, &s.credential, &s.circuit);
+
+    let squatter = Address::generate(&s.env);
+    assert_eq!(
+        s.client
+            .try_claim_credential(&squatter, &s.credential, &s.circuit),
+        Err(Ok(Error::IssuerExists))
+    );
+    assert_eq!(s.client.issuer_of(&s.credential), Some(s.issuer.clone()));
+
+    let aml = Symbol::new(&s.env, "aml");
+    let missing = Symbol::new(&s.env, "nope");
+    assert_eq!(
+        s.client.try_claim_credential(&squatter, &aml, &missing),
+        Err(Ok(Error::CircuitNotFound))
+    );
+}
+
+/// Only the admin can open registration.
+#[test]
+fn non_admin_cannot_open_registration() {
+    let s = setup();
+    let intruder = Address::generate(&s.env);
+    assert_eq!(
+        s.client.try_set_open_registration(&intruder, &true),
+        Err(Ok(Error::NotAdmin))
+    );
+    assert!(!s.client.open_registration());
+}
+
+/// A claim is signed by the issuer it names, so nobody can be made the issuer
+/// of a credential without agreeing to it.
+#[test]
+fn claim_requires_the_issuers_signature() {
+    let s = setup();
+    s.client.set_open_registration(&s.admin, &true);
+    s.client
+        .claim_credential(&s.issuer, &s.credential, &s.circuit);
+
+    let auths = s.env.auths();
+    let (signer, _) = auths.first().expect("claim should record an auth");
+    assert_eq!(signer, &s.issuer);
+}

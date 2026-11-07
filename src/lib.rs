@@ -29,7 +29,8 @@ use soroban_sdk::{
 use types::{
     AdminChanged, AdminProposed, CircuitPaused, CircuitRegistered, CircuitUnpaused,
     CredentialVerified, DataKey, Error, IssuerConfig, IssuerRegistered, IssuerRevoked,
-    IssuerRotated, NullifierKey, Proof, RootHistory, RootPublished, VerifiedKey, VerifyingKey,
+    IssuerRotated, NullifierKey, OpenRegistrationSet, Proof, RootHistory, RootPublished,
+    VerifiedKey, VerifyingKey,
 };
 
 /// Public inputs for the fixed circuit are (root, nullifier, addr), so the IC
@@ -188,28 +189,45 @@ impl VeilproofRegistry {
         circuit: Symbol,
     ) -> Result<(), Error> {
         Self::require_admin(&env, &admin)?;
-        if !env
-            .storage()
-            .persistent()
-            .has(&DataKey::Circuit(circuit.clone()))
-        {
-            return Err(Error::CircuitNotFound);
-        }
-        let key = DataKey::Issuer(credential.clone());
-        if env.storage().persistent().has(&key) {
-            return Err(Error::IssuerExists);
-        }
-        env.storage().persistent().set(
-            &key,
-            &IssuerConfig {
-                issuer: issuer.clone(),
-                active: true,
-                circuit,
-            },
-        );
-        bump(&env, &key);
-        IssuerRegistered { credential, issuer }.publish(&env);
+        Self::write_new_issuer(&env, issuer, credential, circuit)
+    }
+
+    /// Admin allows or stops self-service registration through
+    /// [`Self::claim_credential`]. Closed by default, and meant for sandboxes
+    /// such as the public testnet demo.
+    pub fn set_open_registration(env: Env, admin: Address, open: bool) -> Result<(), Error> {
+        Self::require_admin(&env, &admin)?;
+        env.storage()
+            .instance()
+            .set(&DataKey::OpenRegistration, &open);
+        bump_instance(&env);
+        OpenRegistrationSet { open }.publish(&env);
         Ok(())
+    }
+
+    /// On a registry with open registration, `issuer` claims an unused
+    /// credential name for itself, bound to an existing circuit.
+    ///
+    /// This changes what a credential means. On an open registry anyone can be
+    /// an issuer, so `is_verified` says only that an address belongs to the set
+    /// of whoever claimed that name: a consumer has to check `issuer_of` before
+    /// trusting it. Circuits remain admin-curated, as does the ability to revoke.
+    pub fn claim_credential(
+        env: Env,
+        issuer: Address,
+        credential: Symbol,
+        circuit: Symbol,
+    ) -> Result<(), Error> {
+        issuer.require_auth();
+        let open: bool = env
+            .storage()
+            .instance()
+            .get(&DataKey::OpenRegistration)
+            .unwrap_or(false);
+        if !open {
+            return Err(Error::RegistrationClosed);
+        }
+        Self::write_new_issuer(&env, issuer, credential, circuit)
     }
 
     /// Admin replaces the issuer for `credential` with `new_issuer`, which also
@@ -501,12 +519,50 @@ impl VeilproofRegistry {
         env.storage().instance().get(&DataKey::Admin)
     }
 
+    /// Whether anyone may claim an unused credential name.
+    pub fn open_registration(env: Env) -> bool {
+        env.storage()
+            .instance()
+            .get(&DataKey::OpenRegistration)
+            .unwrap_or(false)
+    }
+
     /// The address offered the admin role and yet to accept it, if any.
     pub fn pending_admin(env: Env) -> Option<Address> {
         env.storage().instance().get(&DataKey::PendingAdmin)
     }
 
     // --- internal ------------------------------------------------------
+
+    fn write_new_issuer(
+        env: &Env,
+        issuer: Address,
+        credential: Symbol,
+        circuit: Symbol,
+    ) -> Result<(), Error> {
+        if !env
+            .storage()
+            .persistent()
+            .has(&DataKey::Circuit(circuit.clone()))
+        {
+            return Err(Error::CircuitNotFound);
+        }
+        let key = DataKey::Issuer(credential.clone());
+        if env.storage().persistent().has(&key) {
+            return Err(Error::IssuerExists);
+        }
+        env.storage().persistent().set(
+            &key,
+            &IssuerConfig {
+                issuer: issuer.clone(),
+                active: true,
+                circuit,
+            },
+        );
+        bump(env, &key);
+        IssuerRegistered { credential, issuer }.publish(env);
+        Ok(())
+    }
 
     fn require_admin(env: &Env, admin: &Address) -> Result<(), Error> {
         let stored: Address = env
