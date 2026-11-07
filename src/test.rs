@@ -490,3 +490,91 @@ fn verifying_extends_what_it_reads() {
     assert!(roots_ttl >= 89 * DAY);
     assert!(instance_ttl(&s) >= 89 * DAY);
 }
+
+/// A handover completes only once the new address accepts it, and the old admin
+/// loses privilege in that same step.
+#[test]
+fn admin_handover_moves_the_role() {
+    let s = setup();
+    let next = Address::generate(&s.env);
+
+    s.client.propose_admin(&s.admin, &next);
+    assert_eq!(s.client.pending_admin(), Some(next.clone()));
+    // Nothing changes until it is accepted.
+    assert_eq!(s.client.admin(), Some(s.admin.clone()));
+    s.client
+        .register_issuer(&s.admin, &s.issuer, &s.credential, &s.circuit);
+
+    s.client.accept_admin(&next);
+    assert_eq!(s.client.admin(), Some(next.clone()));
+    assert_eq!(s.client.pending_admin(), None);
+
+    let aml = Symbol::new(&s.env, "aml");
+    let res = s
+        .client
+        .try_register_issuer(&s.admin, &s.issuer, &aml, &s.circuit);
+    assert_eq!(res, Err(Ok(Error::NotAdmin)));
+    s.client.register_issuer(&next, &s.issuer, &aml, &s.circuit);
+}
+
+/// Only the admin can start a handover.
+#[test]
+fn non_admin_cannot_propose_admin() {
+    let s = setup();
+    let intruder = Address::generate(&s.env);
+    let res = s.client.try_propose_admin(&intruder, &intruder);
+    assert_eq!(res, Err(Ok(Error::NotAdmin)));
+    assert_eq!(s.client.pending_admin(), None);
+}
+
+/// Only the proposed address can accept, and only while an offer stands.
+#[test]
+fn only_the_proposed_address_can_accept() {
+    let s = setup();
+    let next = Address::generate(&s.env);
+    let intruder = Address::generate(&s.env);
+
+    assert_eq!(
+        s.client.try_accept_admin(&next),
+        Err(Ok(Error::NotPendingAdmin))
+    );
+
+    s.client.propose_admin(&s.admin, &next);
+    assert_eq!(
+        s.client.try_accept_admin(&intruder),
+        Err(Ok(Error::NotPendingAdmin))
+    );
+    assert_eq!(s.client.admin(), Some(s.admin.clone()));
+}
+
+/// The recovery path for a mistyped address: a second proposal replaces the
+/// first, which can then no longer be accepted.
+#[test]
+fn a_new_proposal_replaces_the_old_one() {
+    let s = setup();
+    let mistyped = Address::generate(&s.env);
+    let intended = Address::generate(&s.env);
+
+    s.client.propose_admin(&s.admin, &mistyped);
+    s.client.propose_admin(&s.admin, &intended);
+
+    assert_eq!(
+        s.client.try_accept_admin(&mistyped),
+        Err(Ok(Error::NotPendingAdmin))
+    );
+    s.client.accept_admin(&intended);
+    assert_eq!(s.client.admin(), Some(intended));
+}
+
+/// A completed handover cannot be accepted a second time.
+#[test]
+fn an_accepted_offer_cannot_be_reused() {
+    let s = setup();
+    let next = Address::generate(&s.env);
+    s.client.propose_admin(&s.admin, &next);
+    s.client.accept_admin(&next);
+    assert_eq!(
+        s.client.try_accept_admin(&next),
+        Err(Ok(Error::NotPendingAdmin))
+    );
+}
