@@ -114,13 +114,15 @@ to `bn254.pairing_check(vp1, vp2)` as the two vectors
 | Function                                                       | Auth   | Purpose                                              |
 | -------------------------------------------------------------- | ------ | ---------------------------------------------------- |
 | `__constructor(admin, grace_seconds)`                          | —      | Set admin and the grace window                       |
+| `propose_admin(admin, new_admin)`                              | admin  | Offer the admin role; the admin keeps it until accepted |
+| `accept_admin(new_admin)`                                      | new admin | Take the offered role; the old admin loses it     |
 | `register_circuit(admin, circuit, vk)`                         | admin  | Register a verifying key under a circuit name (register-once) |
 | `register_issuer(admin, issuer, credential, circuit)`          | admin  | Authorize an issuer for a credential, bound to a circuit |
 | `revoke_issuer(admin, credential)`                             | admin  | Deactivate that issuer                               |
 | `publish_root(issuer, credential, merkle_root)`                | issuer | Publish/update the Merkle root (prior root kept)     |
 | `verify_credential(holder, credential, proof, nullifier)`      | holder | Verify a proof, burn the nullifier, record the holder |
 | `is_verified(holder, credential) -> bool`                      | view   | The on-chain compliance boolean                      |
-| `verified_at`, `is_nullifier_used`, `current_root`, `issuer_of`, `circuit_of`, `has_circuit`, `admin` | view | Registry reads |
+| `verified_at`, `is_nullifier_used`, `current_root`, `issuer_of`, `circuit_of`, `has_circuit`, `admin`, `pending_admin` | view | Registry reads |
 
 Every registered circuit shares the same **public-input schema**
 (root, nullifier, addr), so different circuits (e.g. a deeper tree or a
