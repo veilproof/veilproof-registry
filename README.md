@@ -142,15 +142,37 @@ admin-curated.
 
 ## Testnet deployment
 
-**Contract ID:** `CC4IXULTDJ5OPE2YOBNIROD2HME2VA7QNK2NDCIUQQ453PZGFZVDMJFR`
+**Contract ID:** `CDTKXCMHMNRIOBO5IFMZIYT3FI4U72T2IYSBMA7S3W4AGPVIA5I4GQRH`
 
-[Stellar Expert](https://stellar.expert/explorer/testnet/contract/CC4IXULTDJ5OPE2YOBNIROD2HME2VA7QNK2NDCIUQQ453PZGFZVDMJFR)
-· [Lab](https://lab.stellar.org/r/testnet/contract/CC4IXULTDJ5OPE2YOBNIROD2HME2VA7QNK2NDCIUQQ453PZGFZVDMJFR)
+[Stellar Expert](https://stellar.expert/explorer/testnet/contract/CDTKXCMHMNRIOBO5IFMZIYT3FI4U72T2IYSBMA7S3W4AGPVIA5I4GQRH)
+· [Lab](https://lab.stellar.org/r/testnet/contract/CDTKXCMHMNRIOBO5IFMZIYT3FI4U72T2IYSBMA7S3W4AGPVIA5I4GQRH)
 
-Constructed with an admin and a 3600-second grace window. This is the instance
-[veilproof-web](https://github.com/veilproof/veilproof-web) reads for its
-on-chain verification lookup. Circuits and issuers are registered by the admin
-after deployment — see the API table above.
+This is the instance [veilproof-web](https://github.com/veilproof/veilproof-web)
+uses. It runs with a 3600-second grace window, the `membership` circuit from the
+`keys-testnet` setup, and **open registration on**, so a visitor can claim a
+credential and run the whole flow alone. Don't read a status on it as a
+compliance claim: see the trust model below.
+[`deployments/testnet.json`](deployments/testnet.json) records the deployment.
+
+Testnet is reset from time to time, which removes every contract on it. To
+redeploy, which takes no account beyond a key funded from friendbot:
+
+```sh
+cargo build --locked --release --target wasm32v1-none
+npm install --prefix scripts
+node scripts/deploy-testnet.mjs      # writes deployments/testnet.json
+```
+
+Then point veilproof-web at the new contract id. To exercise a deployment, with
+the prover and keys from veilproof-server:
+
+```sh
+node scripts/e2e-testnet.mjs <veilproof_prover.wasm> <pk.bin> <vk.bin>
+```
+
+That claims a credential, publishes a root, proves in WebAssembly, verifies
+on-chain, and checks the contract refuses both a stolen proof (`#7`) and a replay
+(`#8`).
 
 ## Trust model
 
@@ -277,6 +299,8 @@ src/types.rs        storage types, errors, events
 src/test.rs         full test suite, incl. the real-proof verification
 src/test_vector.rs  GENERATED — a real proof in Soroban's BN254 encoding
 tools/testvector/   native tool that generates src/test_vector.rs
+scripts/            testnet deployment, and an end-to-end run against it
+deployments/        the testnet deployment and its verifying key
 ```
 
 ## License

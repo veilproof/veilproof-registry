@@ -1,0 +1,17 @@
+{
+  "network": "testnet",
+  "networkPassphrase": "Test SDF Network ; September 2015",
+  "contractId": "CDTKXCMHMNRIOBO5IFMZIYT3FI4U72T2IYSBMA7S3W4AGPVIA5I4GQRH",
+  "wasmHash": "94f4c0708adb66e07b0a1adcd486414c3de623bec47e253cd2724ea7c8ab7d11",
+  "admin": "GD4GDILQP4NHCVXQW5I5AKWWPEBC7MHIEOKURZ3P7GW5DE65ZF7VVTLR",
+  "circuit": "membership",
+  "graceSeconds": 3600,
+  "openRegistration": true,
+  "deployedAt": "2026-11-07T06:51:57.136Z",
+  "transactions": {
+    "upload": "405e263458dc64fb79fc4eb3fb2ca572bd2e33aacfa4a1680bf3cd0888431670",
+    "create": "d59f76f12be9c647e3751da745e83fc2796c6ad244a93d053fc035fea478d65d",
+    "registerCircuit": "b1afe33a527f656855c09ff780a3dc9c1c17129497eedb4c83b7045b758903eb",
+    "openRegistration": "bad6136bc6756d92180b95269ffadb184d83ed26c4dcabd9ff4b406b9e6d1c99"
+  }
+}
