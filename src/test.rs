@@ -712,3 +712,101 @@ fn enormous_grace_saturates_rather_than_overflows() {
     client.verify_credential(&holder, &credential, &real_proof(&env), &nullifier(&env));
     assert!(client.is_verified(&holder, &credential));
 }
+
+fn ready_to_verify(s: &Setup) {
+    s.client
+        .register_issuer(&s.admin, &s.issuer, &s.credential, &s.circuit);
+    s.client
+        .publish_root(&s.issuer, &s.credential, &root(&s.env));
+}
+
+/// A paused circuit refuses a valid proof, and the same proof verifies once it
+/// is resumed: pausing consumes nothing.
+#[test]
+fn pause_blocks_verification_until_resumed() {
+    let s = setup();
+    ready_to_verify(&s);
+
+    s.client.pause_circuit(&s.admin, &s.circuit);
+    assert!(s.client.is_circuit_paused(&s.circuit));
+    assert_eq!(try_real_verify(&s), Err(Error::CircuitPaused));
+    assert!(!s
+        .client
+        .is_nullifier_used(&s.credential, &nullifier(&s.env)));
+
+    s.client.unpause_circuit(&s.admin, &s.circuit);
+    assert!(!s.client.is_circuit_paused(&s.circuit));
+    assert_eq!(try_real_verify(&s), Ok(()));
+}
+
+/// Consumers reading existing statuses must not break during a pause.
+#[test]
+fn reads_keep_working_while_paused() {
+    let s = setup();
+    ready_to_verify(&s);
+    assert_eq!(try_real_verify(&s), Ok(()));
+
+    s.client.pause_circuit(&s.admin, &s.circuit);
+
+    assert!(s.client.is_verified(&s.holder, &s.credential));
+    assert!(s.client.verified_at(&s.holder, &s.credential).is_some());
+    let holders = vec![&s.env, s.holder.clone()];
+    assert_eq!(
+        s.client.are_verified(&holders, &s.credential).get(0),
+        Some(true)
+    );
+    assert_eq!(s.client.current_root(&s.credential), Some(root(&s.env)));
+}
+
+/// A pause covers one circuit, leaving credentials on others untouched.
+#[test]
+fn pause_is_scoped_to_one_circuit() {
+    let s = setup();
+    let unaffected = Symbol::new(&s.env, "membership2");
+    s.client
+        .register_circuit(&s.admin, &unaffected, &verifying_key(&s.env));
+    let aml = Symbol::new(&s.env, "aml");
+    s.client
+        .register_issuer(&s.admin, &s.issuer, &aml, &unaffected);
+    s.client.publish_root(&s.issuer, &aml, &root(&s.env));
+    ready_to_verify(&s);
+
+    s.client.pause_circuit(&s.admin, &s.circuit);
+
+    assert_eq!(try_real_verify(&s), Err(Error::CircuitPaused));
+    s.client
+        .verify_credential(&s.holder, &aml, &real_proof(&s.env), &nullifier(&s.env));
+    assert!(s.client.is_verified(&s.holder, &aml));
+}
+
+/// Publishing stays open during a pause, since a root alone grants nothing.
+#[test]
+fn publishing_still_works_while_paused() {
+    let s = setup();
+    ready_to_verify(&s);
+    s.client.pause_circuit(&s.admin, &s.circuit);
+
+    let next = BytesN::from_array(&s.env, &[9u8; 32]);
+    s.client.publish_root(&s.issuer, &s.credential, &next);
+    assert_eq!(s.client.current_root(&s.credential), Some(next));
+}
+
+/// Pausing and resuming are admin-only, and a pause must name a real circuit.
+#[test]
+fn pause_is_admin_only_and_checks_the_circuit() {
+    let s = setup();
+    let intruder = Address::generate(&s.env);
+    assert_eq!(
+        s.client.try_pause_circuit(&intruder, &s.circuit),
+        Err(Ok(Error::NotAdmin))
+    );
+    assert_eq!(
+        s.client.try_unpause_circuit(&intruder, &s.circuit),
+        Err(Ok(Error::NotAdmin))
+    );
+    let missing = Symbol::new(&s.env, "nope");
+    assert_eq!(
+        s.client.try_pause_circuit(&s.admin, &missing),
+        Err(Ok(Error::CircuitNotFound))
+    );
+}
