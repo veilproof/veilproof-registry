@@ -125,12 +125,14 @@ to `bn254.pairing_check(vp1, vp2)` as the two vectors
 | `register_circuit(admin, circuit, vk)`                         | admin  | Register a verifying key under a circuit name (register-once) |
 | `pause_circuit(admin, circuit)`, `unpause_circuit(admin, circuit)` | admin | Stop or resume `verify_credential` on a circuit; reads are unaffected |
 | `register_issuer(admin, issuer, credential, circuit)`          | admin  | Authorize an issuer for a credential, bound to a circuit |
+| `set_open_registration(admin, open)`                           | admin  | Allow or stop self-service claims (closed by default) |
+| `claim_credential(issuer, credential, circuit)`                | issuer | Claim an unused credential name, if registration is open |
 | `revoke_issuer(admin, credential)`                             | admin  | Deactivate that issuer                               |
 | `rotate_issuer(admin, credential, new_issuer)`                 | admin  | Replace the issuer, keeping roots and verified holders |
 | `publish_root(issuer, credential, merkle_root)`                | issuer | Publish/update the Merkle root (prior root kept)     |
 | `verify_credential(holder, credential, proof, nullifier)`      | holder | Verify a proof, burn the nullifier, record the holder |
 | `is_verified(holder, credential) -> bool`                      | view   | The on-chain compliance boolean                      |
-| `verified_at`, `is_nullifier_used`, `current_root`, `issuer_of`, `circuit_of`, `has_circuit`, `is_circuit_paused`, `admin`, `pending_admin` | view | Registry reads |
+| `verified_at`, `is_nullifier_used`, `current_root`, `issuer_of`, `circuit_of`, `has_circuit`, `is_circuit_paused`, `open_registration`, `admin`, `pending_admin` | view | Registry reads |
 
 Every registered circuit shares the same **public-input schema**
 (root, nullifier, addr), so different circuits (e.g. a deeper tree or a
@@ -174,6 +176,11 @@ after deployment — see the API table above.
   issuer defines "who is in the set" by publishing roots. The ZK property is
   that holders prove membership *without revealing which member*; it is not a
   claim that the issuer's set is itself correct.
+- **Open registration changes what "verified" means.** It is off by default,
+  and exists so a public sandbox can let a visitor run the whole flow alone. On
+  a registry with it on, anyone can claim a free credential name, so
+  `is_verified` says only that an address is in the set of whoever claimed it. A
+  consumer of such a registry has to check `issuer_of` as well.
 - **Issuer keys can be replaced by the admin only.** `rotate_issuer` is for a
   lost or compromised key, so the key itself cannot authorize it. Roots and
   verified holders survive rotation. A credential cannot be registered twice,
