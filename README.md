@@ -56,6 +56,12 @@ issuer's current root (or the immediately previous one, within a grace
 window). A proof therefore cannot claim membership in a root the issuer never
 published.
 
+The grace window opens when a root is superseded and is inclusive of its last
+second. Only one previous root is kept, which bounds verification to two pairing
+checks, so a second update inside the window drops the older root immediately.
+`grace_seconds` is fixed at construction on purpose: it is part of what a holder
+relies on, and an admin able to shrink it could invalidate proofs in flight.
+
 ## BN254 Encoding Notes
 
 **This is the single most important section in the repository.** Soroban's
