@@ -333,7 +333,7 @@ impl VeilproofRegistry {
     /// Verifies a holder's membership proof and, on success, records the
     /// holder as verified for the credential and burns the nullifier.
     ///
-    /// The public inputs to the proof are (root, nullifier). The root is not
+    /// The public inputs to the proof are (root, nullifier, addr). The root is not
     /// taken from the caller — it is the issuer's current root, or the prior
     /// one while still within the grace window — so a proof cannot claim
     /// membership in a root the issuer never published. Passing the root as
@@ -578,10 +578,11 @@ impl VeilproofRegistry {
     }
 }
 
-/// Verifies a Groth16 proof for the fixed (root, nullifier) circuit against
+/// Verifies a Groth16 proof with public inputs (root, nullifier, addr) against
 /// one candidate root, using the native BN254 pairing check.
 ///
-/// The verification equation, with `vk_x = IC[0] + root·IC[1] + nullifier·IC[2]`:
+/// The verification equation, with
+/// `vk_x = IC[0] + root·IC[1] + nullifier·IC[2] + addr·IC[3]`:
 ///
 ///   e(-A, B) · e(alpha, beta) · e(vk_x, gamma) · e(C, delta) == 1
 ///

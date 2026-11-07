@@ -14,9 +14,9 @@ welcome.
   README's "BN254 Encoding Notes" with a CAP-0074 citation. If you change
   anything touching serialization, cite the authoritative source and prove it
   with a real proof through `pairing_check`, not a synthetic byte string.
-- **Keep the verifying key fixed at construction** unless you are deliberately
-  implementing circuit updatability — and if you do, treat it as the breaking,
-  admin-gated, security-critical change it is, with tests.
+- **Keep circuits register-once.** A circuit name must never be repointed at a
+  different verifying key, since that would change what proofs verify. A new key
+  means a new name.
 
 ## Development
 
