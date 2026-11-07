@@ -158,6 +158,16 @@ pub struct IssuerRevoked {
     pub credential: Symbol,
 }
 
+/// A credential's issuer was replaced, keeping its roots and verified holders.
+#[contractevent(topics = ["rotated"])]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct IssuerRotated {
+    #[topic]
+    pub credential: Symbol,
+    pub previous: Address,
+    pub issuer: Address,
+}
+
 /// A new Merkle root was published for a credential.
 #[contractevent(topics = ["root"])]
 #[derive(Clone, Debug, Eq, PartialEq)]
